@@ -111,6 +111,7 @@ static void destroy_surface(struct swaylock_surface *surface) {
 	}
 	destroy_buffer(&surface->indicator_buffers[0]);
 	destroy_buffer(&surface->indicator_buffers[1]);
+	destroy_effect(surface);
 	wl_output_release(surface->output);
 	free(surface);
 }
@@ -1075,8 +1076,8 @@ static void comm_in(int fd, short mask, void *data) {
 		if (auth_success) {
 			// Authentication succeeded
 			state.auth_state = AUTH_STATE_VALID;
-			slots_win(&state);
-			loop_add_timer(state.eventloop, SLOT_UNLOCK_DELAY_MS, unlock, NULL);
+			slots_win(&state, unlock);
+			loop_add_timer(state.eventloop, SLOT_UNLOCK_TIMEOUT_MS, unlock, NULL);
 			damage_state(&state);
 		} else {
 			state.auth_state = AUTH_STATE_INVALID;

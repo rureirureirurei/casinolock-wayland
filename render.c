@@ -1,6 +1,7 @@
 #include <math.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 #include <wayland-client.h>
 #include "cairo.h"
 #include "background-image.h"
@@ -184,19 +185,103 @@ static cairo_surface_t *sprite(const char *symbol, int size) {
 	return surface;
 }
 
-static void draw_particles(cairo_t *cairo, struct slot_machine *m,
+void destroy_effect(struct swaylock_surface *surface) {
+	if (surface->effect_subsurface) {
+		wl_subsurface_destroy(surface->effect_subsurface);
+		surface->effect_subsurface = NULL;
+	}
+	if (surface->effect) {
+		wl_surface_destroy(surface->effect);
+		surface->effect = NULL;
+	}
+	destroy_buffer(&surface->effect_buffers[0]);
+	destroy_buffer(&surface->effect_buffers[1]);
+	memset(surface->effect_drawn, 0, sizeof(surface->effect_drawn));
+	surface->effect_committed.count = 0;
+}
+
+static void damage_rects(struct wl_surface *wl_surface, struct effect_rects *rects) {
+	for (int i = 0; i < rects->count; i++) {
+		int *r = rects->rects[i];
+		wl_surface_damage_buffer(wl_surface, r[0], r[1], r[2], r[3]);
+	}
+}
+
+// Particles fly over the whole output on their own subsurface. Only the
+// rectangles around particles are cleared, redrawn and damaged each frame.
+static void render_effect(struct swaylock_surface *surface,
 		double cx, double cy, double size) {
-	int sprite_size = size * 0.6;
+	struct swaylock_state *state = surface->state;
+	struct slot_machine *m = &state->slots;
+	if (!slots_effect_active(m)) {
+		if (surface->effect) {
+			destroy_effect(surface);
+		}
+		return;
+	}
+	int width = surface->width * surface->scale;
+	int height = surface->height * surface->scale;
+	m->bound_x = fmax(m->bound_x, fmax(cx, width - cx) / size);
+	m->bound_y = fmax(m->bound_y, fmax(cy, height - cy) / size);
+
+	if (!surface->effect) {
+		surface->effect = wl_compositor_create_surface(state->compositor);
+		surface->effect_subsurface = wl_subcompositor_get_subsurface(
+			state->subcompositor, surface->effect, surface->surface);
+		wl_subsurface_set_sync(surface->effect_subsurface);
+		wl_subsurface_place_below(surface->effect_subsurface, surface->child);
+		struct wl_region *region = wl_compositor_create_region(state->compositor);
+		wl_surface_set_input_region(surface->effect, region);
+		wl_region_destroy(region);
+	}
+	struct pool_buffer *buffer = get_next_buffer(state->shm,
+		surface->effect_buffers, width, height);
+	if (!buffer) {
+		return;
+	}
+	struct effect_rects *drawn = &surface->effect_drawn[buffer - surface->effect_buffers];
+	if (drawn->data != buffer->data) {
+		drawn->data = buffer->data; // fresh buffer, already transparent
+		drawn->count = 0;
+	}
+
+	cairo_t *cairo = buffer->cairo;
+	cairo_save(cairo);
+	cairo_set_operator(cairo, CAIRO_OPERATOR_CLEAR);
+	for (int i = 0; i < drawn->count; i++) {
+		int *r = drawn->rects[i];
+		cairo_rectangle(cairo, r[0], r[1], r[2], r[3]);
+	}
+	cairo_fill(cairo);
+	cairo_restore(cairo);
+	damage_rects(surface->effect, drawn);
+	damage_rects(surface->effect, &surface->effect_committed);
+
+	int sprite_size = size * 0.8;
+	int extent = sprite_size * 1.5; // covers the sprite at any rotation
+	drawn->count = 0;
 	for (int i = 0; i < m->particle_count; i++) {
 		struct slot_particle *p = &m->particles[i];
+		double x = cx + p->x * size, y = cy + p->y * size;
+		double fade = (SLOT_PARTICLE_LIFE - p->age) / 15.0;
 		cairo_save(cairo);
-		cairo_translate(cairo, cx + p->x * size, cy + p->y * size);
+		cairo_translate(cairo, x, y);
 		cairo_rotate(cairo, p->rotation);
 		cairo_set_source_surface(cairo, sprite(p->symbol, sprite_size),
 			-sprite_size, -sprite_size);
-		cairo_paint(cairo);
+		cairo_paint_with_alpha(cairo, fade < 1 ? fade : 1);
 		cairo_restore(cairo);
+		int *r = drawn->rects[drawn->count++];
+		r[0] = x - extent;
+		r[1] = y - extent;
+		r[2] = r[3] = 2 * extent;
 	}
+	damage_rects(surface->effect, drawn);
+	surface->effect_committed = *drawn;
+
+	wl_surface_set_buffer_scale(surface->effect, surface->scale);
+	wl_surface_attach(surface->effect, buffer->buffer, 0, 0);
+	wl_surface_commit(surface->effect);
 }
 
 static void draw_slots(cairo_t *cairo, struct swaylock_state *state,
@@ -208,7 +293,6 @@ static void draw_slots(cairo_t *cairo, struct swaylock_state *state,
 	double cx = width / 2, cy = height / 2;
 	double travel = height / 2 + size;
 	double strength = (double)m->glow / SLOT_GLOW_TICKS;
-	draw_particles(cairo, m, cx, cy, size);
 	cairo_save(cairo);
 	cairo_rectangle(cairo, 0, 0, width, height);
 	cairo_clip(cairo);
@@ -272,7 +356,7 @@ static bool render_frame(struct swaylock_surface *surface) {
 		} else if (state->auth_state == AUTH_STATE_INVALID) {
 			text = "f";
 		} else if (state->auth_state == AUTH_STATE_VALID) {
-			text = "$$$";
+			// the reels say it all
 		} else {
 			// Caps Lock has higher priority
 			if (state->xkb.caps_lock && state->args.show_caps_lock_text) {
@@ -318,11 +402,6 @@ static bool render_frame(struct swaylock_surface *surface) {
 	if (buffer_width < 3 * slot_spacing) {
 		buffer_width = 3 * slot_spacing;
 	}
-	// Room for win particles around the reels, kept a multiple of the scale
-	int margin = 0;
-	if (slots_effect_active(&state->slots)) {
-		margin = (int)(SLOT_EFFECT_MARGIN * slot_size / surface->scale) * surface->scale;
-	}
 
 	if (text || layout_text) {
 		cairo_set_antialias(state->test_cairo, CAIRO_ANTIALIAS_BEST);
@@ -352,8 +431,6 @@ static bool render_frame(struct swaylock_surface *surface) {
 			}
 		}
 	}
-	buffer_width += 2 * margin;
-	buffer_height += 2 * margin;
 	// Ensure buffer size is multiple of buffer scale - required by protocol
 	buffer_height += surface->scale - (buffer_height % surface->scale);
 	buffer_width += surface->scale - (buffer_width % surface->scale);
@@ -377,7 +454,6 @@ static bool render_frame(struct swaylock_surface *surface) {
 		subsurf_ypos = surface->height / 2 -
 			(state->args.radius + state->args.thickness);
 	}
-	subsurf_ypos -= margin / surface->scale;
 
 	struct pool_buffer *buffer = get_next_buffer(state->shm,
 			surface->indicator_buffers, buffer_width, buffer_height);
@@ -398,7 +474,6 @@ static bool render_frame(struct swaylock_surface *surface) {
 	cairo_set_operator(cairo, CAIRO_OPERATOR_SOURCE);
 	cairo_paint(cairo);
 	cairo_restore(cairo);
-	cairo_translate(cairo, 0, margin);
 
 	if (draw_indicator) {
 		draw_slots(cairo, state, buffer_width, buffer_diameter,
@@ -462,6 +537,10 @@ static bool render_frame(struct swaylock_surface *surface) {
 			cairo_new_sub_path(cairo);
 		}
 	}
+
+	render_effect(surface,
+		(subsurf_xpos * surface->scale) + buffer_width / 2.0,
+		(subsurf_ypos * surface->scale) + buffer_diameter / 2.0, slot_size);
 
 	// Send Wayland requests
 	wl_subsurface_set_position(surface->subsurface, subsurf_xpos, subsurf_ypos);

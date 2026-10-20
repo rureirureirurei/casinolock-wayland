@@ -14,7 +14,7 @@
 #define SLOT_SEVEN_ODDS 16 // 1 in N per reel
 #define SLOT_SPRING 0.3
 #define SLOT_DAMPING 0.35
-#define SLOT_EFFECT_TICKS 70
+#define SLOT_EFFECT_TICKS 30
 
 const char slot_seven[] = "7";
 static const char *cross = "❌";
@@ -176,28 +176,23 @@ static void spawn(struct slot_machine *m, double x, double y,
 }
 
 static void effect_spawn(struct slot_machine *m) {
+	double bx = fmax(m->bound_x, 5), by = fmax(m->bound_y, 5);
 	switch (m->theme->effect) {
 	case EFFECT_BURST:
-		if (m->effect_ticks % 4 == 0) {
+		if (m->effect_ticks % 2 == 0) {
 			for (int i = 0; i < 3; i++) {
-				spawn(m, (i - 1) * 1.4, 0, frand(-0.18, 0.18), frand(-0.4, -0.2));
+				spawn(m, (i - 1) * 1.4, 0, frand(-0.3, 0.3), frand(-0.6, -0.3));
 			}
 		}
 		break;
 	case EFFECT_RAIN:
-		if (m->effect_ticks % 2 == 0) {
-			spawn(m, frand(-4.2, 4.2), -4.5, frand(-0.02, 0.02), frand(0.08, 0.14));
-		}
+		spawn(m, frand(-bx, bx), -by - 1, frand(-0.03, 0.03), frand(0.25, 0.4));
 		break;
 	case EFFECT_LAUNCH:
-		if (m->effect_ticks % 3 == 0) {
-			spawn(m, frand(-3.5, 3.5), 4.5, frand(-0.02, 0.02), frand(-0.06, -0.02));
-		}
+		spawn(m, frand(-bx, bx), by + 1, frand(-0.03, 0.03), frand(-0.15, -0.05));
 		break;
 	case EFFECT_FLOAT:
-		if (m->effect_ticks % 3 == 0) {
-			spawn(m, frand(-3.5, 3.5), 3, 0, frand(-0.12, -0.08));
-		}
+		spawn(m, frand(-bx, bx), by + 1, 0, frand(-0.35, -0.25));
 		break;
 	}
 }
@@ -207,22 +202,23 @@ static void effect_step(struct slot_machine *m) {
 		effect_spawn(m);
 		m->effect_ticks--;
 	}
+	double bx = fmax(m->bound_x, 5) + 2, by = fmax(m->bound_y, 5) + 2;
 	int n = 0;
 	for (int i = 0; i < m->particle_count; i++) {
 		struct slot_particle p = m->particles[i];
 		switch (m->theme->effect) {
 		case EFFECT_BURST:
-			p.vy += 0.02;
+			p.vy += 0.03;
 			break;
 		case EFFECT_RAIN:
-			p.vy += 0.003;
+			p.vy += 0.004;
 			break;
 		case EFFECT_LAUNCH:
-			p.vy -= 0.008;
+			p.vy -= 0.012;
 			p.spin = 0;
 			break;
 		case EFFECT_FLOAT:
-			p.vx = sin(p.age * 0.2) * 0.04;
+			p.vx = sin(p.age * 0.15) * 0.08;
 			p.spin = 0;
 			break;
 		}
@@ -230,7 +226,7 @@ static void effect_step(struct slot_machine *m) {
 		p.y += p.vy;
 		p.rotation += p.spin;
 		p.age++;
-		if (fabs(p.x) < 5 && fabs(p.y) < 5) {
+		if (p.age < SLOT_PARTICLE_LIFE && fabs(p.x) < bx && fabs(p.y) < by) {
 			m->particles[n++] = p;
 		}
 	}
@@ -283,6 +279,11 @@ static void slots_tick(void *data) {
 		schedule_tick(state);
 	}
 	damage_state(state);
+	if (m->done && m->won && m->settled && !slots_effect_active(m)) {
+		void (*done)(void *data) = m->done;
+		m->done = NULL;
+		done(state);
+	}
 }
 
 void slots_roll(struct swaylock_state *state) {
@@ -321,8 +322,9 @@ static void stop(struct swaylock_state *state, const char *symbol) {
 	schedule_tick(state);
 }
 
-void slots_win(struct swaylock_state *state) {
+void slots_win(struct swaylock_state *state, void (*done)(void *data)) {
 	state->slots.won = true;
+	state->slots.done = done;
 	stop(state, state->slots.theme->win);
 }
 

@@ -117,6 +117,15 @@ struct swaylock_surface {
 	struct wl_subsurface *subsurface;
 	struct ext_session_lock_surface_v1 *ext_session_lock_surface_v1;
 	struct pool_buffer indicator_buffers[2];
+	// Full screen layer for win particles, only alive while they fly
+	struct wl_surface *effect;
+	struct wl_subsurface *effect_subsurface;
+	struct pool_buffer effect_buffers[2];
+	struct effect_rects {
+		void *data; // buffer the rects were drawn into
+		int count;
+		int rects[SLOT_MAX_PARTICLES][4];
+	} effect_drawn[2], effect_committed;
 	bool created;
 	bool dirty;
 	uint32_t width, height;
@@ -142,6 +151,7 @@ void swaylock_handle_key(struct swaylock_state *state,
 
 void render(struct swaylock_surface *surface);
 void damage_state(struct swaylock_state *state);
+void destroy_effect(struct swaylock_surface *surface);
 void clear_password_buffer(struct swaylock_password *pw);
 void schedule_auth_idle(struct swaylock_state *state);
 

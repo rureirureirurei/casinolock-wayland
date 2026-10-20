@@ -45,7 +45,8 @@ struct slot_particle {
 	int age;
 };
 
-#define SLOT_MAX_PARTICLES 32
+#define SLOT_MAX_PARTICLES 64
+#define SLOT_PARTICLE_LIFE 70 // ticks
 
 struct slot_machine {
 	const struct slot_theme *theme;
@@ -60,12 +61,13 @@ struct slot_machine {
 	int effect_ticks; // remaining particle spawn ticks
 	struct slot_particle particles[SLOT_MAX_PARTICLES];
 	int particle_count;
+	double bound_x, bound_y; // screen half extents in symbol sizes, set by render
+	void (*done)(void *data); // called once the win effect finished
 	struct loop_timer *timer;
 };
 
 #define SLOT_GLOW_TICKS 45
-#define SLOT_UNLOCK_DELAY_MS 2000
-#define SLOT_EFFECT_MARGIN 2.5 // extra room around the reels, in symbol sizes
+#define SLOT_UNLOCK_TIMEOUT_MS 4000 // unlock even if the win effect never ends
 
 bool slots_theme_exists(const char *name);
 bool slots_init(struct swaylock_state *state, const char *theme,
@@ -73,7 +75,7 @@ bool slots_init(struct swaylock_state *state, const char *theme,
 bool slots_effect_active(struct slot_machine *m);
 void slots_roll(struct swaylock_state *state);
 void slots_spin(struct swaylock_state *state);
-void slots_win(struct swaylock_state *state);
+void slots_win(struct swaylock_state *state, void (*done)(void *data));
 void slots_lose(struct swaylock_state *state);
 void slots_clear(struct swaylock_state *state);
 
