@@ -111,17 +111,48 @@ void render(struct swaylock_surface *surface) {
 	}
 }
 
-static void draw_reels(cairo_t *cairo, struct slot_reel *reels,
-		double width, double height, double size, double spacing) {
-	double travel = height / 2 + size;
-	for (int i = 0; i < 3; i++) {
-		cairo_text_extents_t extents;
-		cairo_text_extents(cairo, reels[i].symbol, &extents);
-		cairo_move_to(cairo,
-			width / 2 + (i - 1) * spacing - (extents.width / 2 + extents.x_bearing),
-			height / 2 - (extents.height / 2 + extents.y_bearing) + reels[i].offset * travel);
-		cairo_show_text(cairo, reels[i].symbol);
+static void draw_symbol(cairo_t *cairo, const char *symbol,
+		double cx, double cy, double size) {
+	cairo_text_extents_t extents;
+	cairo_save(cairo);
+	if (symbol == slot_seven) {
+		cairo_select_font_face(cairo, "serif",
+			CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
+		cairo_set_font_size(cairo, size * 1.3);
+	} else {
+		cairo_select_font_face(cairo, "emoji",
+			CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+		cairo_set_font_size(cairo, size);
 	}
+	cairo_text_extents(cairo, symbol, &extents);
+	cairo_move_to(cairo, cx - (extents.width / 2 + extents.x_bearing),
+		cy - (extents.height / 2 + extents.y_bearing));
+	if (symbol == slot_seven) {
+		cairo_text_path(cairo, symbol);
+		cairo_set_source_rgb(cairo, 0.86, 0.1, 0.1);
+		cairo_fill_preserve(cairo);
+		cairo_set_line_width(cairo, size * 0.06);
+		cairo_set_source_rgb(cairo, 1.0, 0.8, 0.2);
+		cairo_stroke(cairo);
+	} else {
+		cairo_show_text(cairo, symbol);
+	}
+	cairo_new_path(cairo);
+	cairo_restore(cairo);
+}
+
+static void draw_glow(cairo_t *cairo, double width, double height,
+		double strength) {
+	cairo_save(cairo);
+	cairo_translate(cairo, width / 2, height / 2);
+	cairo_scale(cairo, width / height, 1);
+	cairo_pattern_t *glow = cairo_pattern_create_radial(0, 0, 0, 0, 0, height / 2);
+	cairo_pattern_add_color_stop_rgba(glow, 0, 1.0, 0.8, 0.2, 0.7 * strength);
+	cairo_pattern_add_color_stop_rgba(glow, 1, 1.0, 0.8, 0.2, 0);
+	cairo_set_source(cairo, glow);
+	cairo_paint(cairo);
+	cairo_pattern_destroy(glow);
+	cairo_restore(cairo);
 }
 
 static void draw_slots(cairo_t *cairo, struct swaylock_state *state,
@@ -130,18 +161,27 @@ static void draw_slots(cairo_t *cairo, struct swaylock_state *state,
 	if (!m->visible) {
 		return;
 	}
+	double cx = width / 2, cy = height / 2;
+	double travel = height / 2 + size;
+	double strength = (double)m->glow / SLOT_GLOW_TICKS;
 	cairo_save(cairo);
 	cairo_rectangle(cairo, 0, 0, width, height);
 	cairo_clip(cairo);
-	cairo_select_font_face(cairo, "Noto Color Emoji",
-		CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
-	cairo_set_font_size(cairo, size);
-	set_color_for_state(cairo, state, &state->args.colors.text);
-	if (m->old_visible) {
-		draw_reels(cairo, m->old_reels, width, height, size, spacing);
+	if (m->glow > 0) {
+		draw_glow(cairo, width, height, strength);
+		if (m->jackpot) {
+			cx += sin(m->glow * 1.7) * size * 0.1 * strength;
+		}
 	}
-	draw_reels(cairo, m->reels, width, height, size, spacing);
-	cairo_new_path(cairo);
+	set_color_for_state(cairo, state, &state->args.colors.text);
+	for (int i = 0; i < 3; i++) {
+		struct slot_reel *r = &m->reels[i];
+		double x = cx + (i - 1) * spacing;
+		if (r->prev) {
+			draw_symbol(cairo, r->prev, x, cy + r->prev_offset * travel, size);
+		}
+		draw_symbol(cairo, r->symbol, x, cy + r->offset * travel, size);
+	}
 	cairo_restore(cairo);
 }
 
@@ -186,6 +226,8 @@ static bool render_frame(struct swaylock_surface *surface) {
 			text = "...";
 		} else if (state->auth_state == AUTH_STATE_INVALID) {
 			text = "f";
+		} else if (state->auth_state == AUTH_STATE_VALID) {
+			text = "$$$";
 		} else {
 			// Caps Lock has higher priority
 			if (state->xkb.caps_lock && state->args.show_caps_lock_text) {

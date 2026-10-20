@@ -14,6 +14,7 @@ enum auth_state {
 	AUTH_STATE_IDLE, // nothing happening
 	AUTH_STATE_VALIDATING, // currently validating password
 	AUTH_STATE_INVALID, // displaying message: password was wrong
+	AUTH_STATE_VALID, // password was right, playing jackpot before unlock
 };
 
 // Indicator state: status of password buffer / typing letters
@@ -70,6 +71,7 @@ struct swaylock_args {
 	bool daemonize;
 	int ready_fd;
 	bool indicator_idle_visible;
+	char *slot_symbols;
 };
 
 struct swaylock_password {

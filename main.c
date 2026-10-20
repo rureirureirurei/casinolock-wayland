@@ -484,6 +484,8 @@ static int parse_options(int argc, char **argv, struct swaylock_state *state,
 		LO_TEXT_CAPS_LOCK_COLOR,
 		LO_TEXT_VER_COLOR,
 		LO_TEXT_WRONG_COLOR,
+		LO_SLOT_THEME,
+		LO_SLOT_SYMBOLS,
 	};
 
 	static struct option long_options[] = {
@@ -541,6 +543,8 @@ static int parse_options(int argc, char **argv, struct swaylock_state *state,
 		{"text-caps-lock-color", required_argument, NULL, LO_TEXT_CAPS_LOCK_COLOR},
 		{"text-ver-color", required_argument, NULL, LO_TEXT_VER_COLOR},
 		{"text-wrong-color", required_argument, NULL, LO_TEXT_WRONG_COLOR},
+		{"slot-theme", required_argument, NULL, LO_SLOT_THEME},
+		{"slot-symbols", required_argument, NULL, LO_SLOT_SYMBOLS},
 		{0, 0, 0, 0}
 	};
 
@@ -663,6 +667,10 @@ static int parse_options(int argc, char **argv, struct swaylock_state *state,
 			"Sets the color of the text when verifying.\n"
 		"  --text-wrong-color <color>       "
 			"Sets the color of the text when invalid.\n"
+		"  --slot-theme <name>              "
+			"Slot symbols: classic, fruit, cards, casino, space, food, zoo.\n"
+		"  --slot-symbols <list>            "
+			"Space-separated custom slot symbols; 7 is the red seven.\n"
 		"\n"
 		"All <color> options are of the form <rrggbb[aa]>.\n";
 
@@ -944,6 +952,23 @@ static int parse_options(int argc, char **argv, struct swaylock_state *state,
 				state->args.colors.text.wrong = parse_color(optarg);
 			}
 			break;
+		case LO_SLOT_THEME:
+			if (state) {
+				const char *symbols = slots_theme(optarg);
+				if (!symbols) {
+					swaylock_log(LOG_ERROR, "Unknown slot theme: %s", optarg);
+					return 1;
+				}
+				free(state->args.slot_symbols);
+				state->args.slot_symbols = strdup(symbols);
+			}
+			break;
+		case LO_SLOT_SYMBOLS:
+			if (state) {
+				free(state->args.slot_symbols);
+				state->args.slot_symbols = strdup(optarg);
+			}
+			break;
 		default:
 			fprintf(stderr, "%s", usage);
 			return 1;
@@ -1037,6 +1062,10 @@ static void display_in(int fd, short mask, void *data) {
 	}
 }
 
+static void unlock(void *data) {
+	state.run_display = false;
+}
+
 static void comm_in(int fd, short mask, void *data) {
 	if (mask & POLLIN) {
 		bool auth_success = false;
@@ -1045,7 +1074,10 @@ static void comm_in(int fd, short mask, void *data) {
 		}
 		if (auth_success) {
 			// Authentication succeeded
-			state.run_display = false;
+			state.auth_state = AUTH_STATE_VALID;
+			slots_win(&state);
+			loop_add_timer(state.eventloop, SLOT_UNLOCK_DELAY_MS, unlock, NULL);
+			damage_state(&state);
 		} else {
 			state.auth_state = AUTH_STATE_INVALID;
 			slots_lose(&state);
@@ -1146,6 +1178,11 @@ int main(int argc, char **argv) {
 			free(state.args.font);
 			return result;
 		}
+	}
+
+	if (!slots_init(&state, state.args.slot_symbols)) {
+		swaylock_log(LOG_ERROR, "Invalid slot symbols");
+		return EXIT_FAILURE;
 	}
 
 	if (line_mode == LM_INSIDE) {

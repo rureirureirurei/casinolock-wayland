@@ -203,6 +203,16 @@ Locks your Wayland session.
 *--text-wrong-color* <rrggbb[aa]>
 	Sets the color of the text when invalid.
 
+# SLOTS
+
+*--slot-theme* <name>
+	Symbol set for the slot reels: classic, fruit, cards, casino, space, food,
+	zoo. Default is classic.
+
+*--slot-symbols* <list>
+	Space-separated custom reel symbols, e.g. "🍕 🐸 7". _7_ is drawn as a red
+	seven. A rare seven is always mixed in.
+
 # SIGNALS
 
 *SIGUSR1*
