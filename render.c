@@ -103,7 +103,6 @@ void render(struct swaylock_surface *surface) {
 		cairo_restore(cairo);
 		cairo_identity_matrix(cairo);
 
-		wl_surface_set_buffer_scale(surface->surface, surface->scale);
 		wl_surface_attach(surface->surface, buffer.buffer, 0, 0);
 		wl_surface_damage_buffer(surface->surface, 0, 0, INT32_MAX, INT32_MAX);
 		need_destroy = true;
@@ -111,6 +110,9 @@ void render(struct swaylock_surface *surface) {
 		surface->last_buffer_width = buffer_width;
 		surface->last_buffer_height = buffer_height;
 	}
+
+	// It is possible for the surface scale to change even if the wl_buffer size hasn't
+	wl_surface_set_buffer_scale(surface->surface, surface->scale);
 
 	render_frame(surface);
 	surface->dirty = false;
