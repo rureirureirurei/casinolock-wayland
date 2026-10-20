@@ -157,23 +157,28 @@ static void draw_glow(cairo_t *cairo, double width, double height,
 	cairo_restore(cairo);
 }
 
-// Particles reuse pre-rendered symbols; scaling color emoji every frame is slow
+static int sprite_dim(int size) {
+	return size * 1.4;
+}
+
+// Symbols are pre-rendered once; scaling color emoji every frame is slow
 static cairo_surface_t *sprite(const char *symbol, int size) {
 	static struct {
 		const char *symbol;
 		int size;
 		cairo_surface_t *surface;
-	} cache[16];
+	} cache[32];
 	static int next;
 	for (size_t i = 0; i < sizeof(cache) / sizeof(*cache); i++) {
 		if (cache[i].surface && cache[i].symbol == symbol && cache[i].size == size) {
 			return cache[i].surface;
 		}
 	}
+	int dim = sprite_dim(size);
 	cairo_surface_t *surface =
-		cairo_image_surface_create(CAIRO_FORMAT_ARGB32, size * 2, size * 2);
+		cairo_image_surface_create(CAIRO_FORMAT_ARGB32, dim, dim);
 	cairo_t *cairo = cairo_create(surface);
-	draw_symbol(cairo, symbol, size, size, size);
+	draw_symbol(cairo, symbol, dim / 2.0, dim / 2.0, size);
 	cairo_destroy(cairo);
 	if (cache[next].surface) {
 		cairo_surface_destroy(cache[next].surface);
@@ -183,6 +188,14 @@ static cairo_surface_t *sprite(const char *symbol, int size) {
 	cache[next].surface = surface;
 	next = (next + 1) % (sizeof(cache) / sizeof(*cache));
 	return surface;
+}
+
+static void draw_sprite(cairo_t *cairo, const char *symbol,
+		double cx, double cy, int size) {
+	int dim = sprite_dim(size);
+	cairo_set_source_surface(cairo, sprite(symbol, size),
+		(int)(cx - dim / 2.0), (int)(cy - dim / 2.0));
+	cairo_paint(cairo);
 }
 
 void destroy_effect(struct swaylock_surface *surface) {
@@ -219,8 +232,12 @@ static void render_effect(struct swaylock_surface *surface,
 		}
 		return;
 	}
-	int width = surface->width * surface->scale;
-	int height = surface->height * surface->scale;
+	// Buffer scale 1: a quarter of the pixels on HiDPI, motion hides the blur
+	cx /= surface->scale;
+	cy /= surface->scale;
+	size /= surface->scale;
+	int width = surface->width;
+	int height = surface->height;
 	m->bound_x = fmax(m->bound_x, fmax(cx, width - cx) / size);
 	m->bound_y = fmax(m->bound_y, fmax(cy, height - cy) / size);
 
@@ -258,7 +275,8 @@ static void render_effect(struct swaylock_surface *surface,
 	damage_rects(surface->effect, &surface->effect_committed);
 
 	int sprite_size = size * 0.8;
-	int extent = sprite_size * 1.5; // covers the sprite at any rotation
+	int dim = sprite_dim(sprite_size);
+	int extent = dim * 0.71 + 1; // covers the sprite at any rotation
 	drawn->count = 0;
 	for (int i = 0; i < m->particle_count; i++) {
 		struct slot_particle *p = &m->particles[i];
@@ -268,7 +286,7 @@ static void render_effect(struct swaylock_surface *surface,
 		cairo_translate(cairo, x, y);
 		cairo_rotate(cairo, p->rotation);
 		cairo_set_source_surface(cairo, sprite(p->symbol, sprite_size),
-			-sprite_size, -sprite_size);
+			-dim / 2, -dim / 2);
 		cairo_paint_with_alpha(cairo, fade < 1 ? fade : 1);
 		cairo_restore(cairo);
 		int *r = drawn->rects[drawn->count++];
@@ -279,7 +297,7 @@ static void render_effect(struct swaylock_surface *surface,
 	damage_rects(surface->effect, drawn);
 	surface->effect_committed = *drawn;
 
-	wl_surface_set_buffer_scale(surface->effect, surface->scale);
+	wl_surface_set_buffer_scale(surface->effect, 1);
 	wl_surface_attach(surface->effect, buffer->buffer, 0, 0);
 	wl_surface_commit(surface->effect);
 }
@@ -307,9 +325,9 @@ static void draw_slots(cairo_t *cairo, struct swaylock_state *state,
 		struct slot_reel *r = &m->reels[i];
 		double x = cx + (i - 1) * spacing;
 		if (r->prev) {
-			draw_symbol(cairo, r->prev, x, cy + r->prev_offset * travel, size);
+			draw_sprite(cairo, r->prev, x, cy + r->prev_offset * travel, size);
 		}
-		draw_symbol(cairo, r->symbol, x, cy + r->offset * travel, size);
+		draw_sprite(cairo, r->symbol, x, cy + r->offset * travel, size);
 	}
 	cairo_restore(cairo);
 }
