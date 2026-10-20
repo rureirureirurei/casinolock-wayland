@@ -47,6 +47,11 @@ struct loop_timer *loop_add_timer(struct loop *loop, int ms,
 bool loop_remove_fd(struct loop *loop, int fd);
 
 /**
+ * Stop polling a file descriptor. Safe to call from an fd callback.
+ */
+bool loop_ignore_fd(struct loop *loop, int fd);
+
+/**
  * Remove a timer from the loop.
  */
 bool loop_remove_timer(struct loop *loop, struct loop_timer *timer);

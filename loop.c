@@ -173,6 +173,16 @@ struct loop_timer *loop_add_timer(struct loop *loop, int ms,
 	return timer;
 }
 
+bool loop_ignore_fd(struct loop *loop, int fd) {
+	for (int i = 0; i < loop->fd_length; ++i) {
+		if (loop->fds[i].fd == fd) {
+			loop->fds[i].fd = -1;
+			return true;
+		}
+	}
+	return false;
+}
+
 bool loop_remove_fd(struct loop *loop, int fd) {
 	size_t fd_index = 0;
 	struct loop_fd_event *event = NULL, *tmp_event = NULL;

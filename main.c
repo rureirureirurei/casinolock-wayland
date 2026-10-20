@@ -1086,6 +1086,11 @@ static void comm_in(int fd, short mask, void *data) {
 			damage_state(&state);
 		}
 	} else if (mask & (POLLHUP | POLLERR)) {
+		if (state.auth_state == AUTH_STATE_VALID) {
+			// Backend exits after a success; the unlock timer is pending
+			loop_ignore_fd(state.eventloop, fd);
+			return;
+		}
 		swaylock_log(LOG_ERROR,	"Password checking subprocess crashed; exiting.");
 		exit(EXIT_FAILURE);
 	}
