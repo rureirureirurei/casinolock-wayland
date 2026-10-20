@@ -668,7 +668,8 @@ static int parse_options(int argc, char **argv, struct swaylock_state *state,
 		"  --text-wrong-color <color>       "
 			"Sets the color of the text when invalid.\n"
 		"  --slot-theme <name>              "
-			"Slot symbols: classic, fruit, cards, casino, space, food, zoo.\n"
+			"Slot theme: random (default), classic, fruit, cards,\n"
+		"                                   casino, space, food, zoo.\n"
 		"  --slot-symbols <list>            "
 			"Space-separated custom slot symbols; 7 is the red seven.\n"
 		"\n"
@@ -954,13 +955,12 @@ static int parse_options(int argc, char **argv, struct swaylock_state *state,
 			break;
 		case LO_SLOT_THEME:
 			if (state) {
-				const char *symbols = slots_theme(optarg);
-				if (!symbols) {
+				if (!slots_theme_exists(optarg)) {
 					swaylock_log(LOG_ERROR, "Unknown slot theme: %s", optarg);
 					return 1;
 				}
-				free(state->args.slot_symbols);
-				state->args.slot_symbols = strdup(symbols);
+				free(state->args.slot_theme);
+				state->args.slot_theme = strdup(optarg);
 			}
 			break;
 		case LO_SLOT_SYMBOLS:
@@ -1185,7 +1185,7 @@ int main(int argc, char **argv) {
 		}
 	}
 
-	if (!slots_init(&state, state.args.slot_symbols)) {
+	if (!slots_init(&state, state.args.slot_theme, state.args.slot_symbols)) {
 		swaylock_log(LOG_ERROR, "Invalid slot symbols");
 		return EXIT_FAILURE;
 	}

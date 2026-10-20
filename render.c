@@ -142,17 +142,61 @@ static void draw_symbol(cairo_t *cairo, const char *symbol,
 }
 
 static void draw_glow(cairo_t *cairo, double width, double height,
-		double strength) {
+		const double color[3], double strength) {
 	cairo_save(cairo);
 	cairo_translate(cairo, width / 2, height / 2);
 	cairo_scale(cairo, width / height, 1);
 	cairo_pattern_t *glow = cairo_pattern_create_radial(0, 0, 0, 0, 0, height / 2);
-	cairo_pattern_add_color_stop_rgba(glow, 0, 1.0, 0.8, 0.2, 0.7 * strength);
-	cairo_pattern_add_color_stop_rgba(glow, 1, 1.0, 0.8, 0.2, 0);
+	cairo_pattern_add_color_stop_rgba(glow, 0,
+		color[0], color[1], color[2], 0.7 * strength);
+	cairo_pattern_add_color_stop_rgba(glow, 1, color[0], color[1], color[2], 0);
 	cairo_set_source(cairo, glow);
 	cairo_paint(cairo);
 	cairo_pattern_destroy(glow);
 	cairo_restore(cairo);
+}
+
+// Particles reuse pre-rendered symbols; scaling color emoji every frame is slow
+static cairo_surface_t *sprite(const char *symbol, int size) {
+	static struct {
+		const char *symbol;
+		int size;
+		cairo_surface_t *surface;
+	} cache[16];
+	static int next;
+	for (size_t i = 0; i < sizeof(cache) / sizeof(*cache); i++) {
+		if (cache[i].surface && cache[i].symbol == symbol && cache[i].size == size) {
+			return cache[i].surface;
+		}
+	}
+	cairo_surface_t *surface =
+		cairo_image_surface_create(CAIRO_FORMAT_ARGB32, size * 2, size * 2);
+	cairo_t *cairo = cairo_create(surface);
+	draw_symbol(cairo, symbol, size, size, size);
+	cairo_destroy(cairo);
+	if (cache[next].surface) {
+		cairo_surface_destroy(cache[next].surface);
+	}
+	cache[next].symbol = symbol;
+	cache[next].size = size;
+	cache[next].surface = surface;
+	next = (next + 1) % (sizeof(cache) / sizeof(*cache));
+	return surface;
+}
+
+static void draw_particles(cairo_t *cairo, struct slot_machine *m,
+		double cx, double cy, double size) {
+	int sprite_size = size * 0.6;
+	for (int i = 0; i < m->particle_count; i++) {
+		struct slot_particle *p = &m->particles[i];
+		cairo_save(cairo);
+		cairo_translate(cairo, cx + p->x * size, cy + p->y * size);
+		cairo_rotate(cairo, p->rotation);
+		cairo_set_source_surface(cairo, sprite(p->symbol, sprite_size),
+			-sprite_size, -sprite_size);
+		cairo_paint(cairo);
+		cairo_restore(cairo);
+	}
 }
 
 static void draw_slots(cairo_t *cairo, struct swaylock_state *state,
@@ -164,12 +208,13 @@ static void draw_slots(cairo_t *cairo, struct swaylock_state *state,
 	double cx = width / 2, cy = height / 2;
 	double travel = height / 2 + size;
 	double strength = (double)m->glow / SLOT_GLOW_TICKS;
+	draw_particles(cairo, m, cx, cy, size);
 	cairo_save(cairo);
 	cairo_rectangle(cairo, 0, 0, width, height);
 	cairo_clip(cairo);
 	if (m->glow > 0) {
-		draw_glow(cairo, width, height, strength);
-		if (m->jackpot) {
+		draw_glow(cairo, width, height, m->theme->glow, strength);
+		if (m->shake) {
 			cx += sin(m->glow * 1.7) * size * 0.1 * strength;
 		}
 	}
@@ -273,6 +318,11 @@ static bool render_frame(struct swaylock_surface *surface) {
 	if (buffer_width < 3 * slot_spacing) {
 		buffer_width = 3 * slot_spacing;
 	}
+	// Room for win particles around the reels, kept a multiple of the scale
+	int margin = 0;
+	if (slots_effect_active(&state->slots)) {
+		margin = (int)(SLOT_EFFECT_MARGIN * slot_size / surface->scale) * surface->scale;
+	}
 
 	if (text || layout_text) {
 		cairo_set_antialias(state->test_cairo, CAIRO_ANTIALIAS_BEST);
@@ -302,6 +352,8 @@ static bool render_frame(struct swaylock_surface *surface) {
 			}
 		}
 	}
+	buffer_width += 2 * margin;
+	buffer_height += 2 * margin;
 	// Ensure buffer size is multiple of buffer scale - required by protocol
 	buffer_height += surface->scale - (buffer_height % surface->scale);
 	buffer_width += surface->scale - (buffer_width % surface->scale);
@@ -325,6 +377,7 @@ static bool render_frame(struct swaylock_surface *surface) {
 		subsurf_ypos = surface->height / 2 -
 			(state->args.radius + state->args.thickness);
 	}
+	subsurf_ypos -= margin / surface->scale;
 
 	struct pool_buffer *buffer = get_next_buffer(state->shm,
 			surface->indicator_buffers, buffer_width, buffer_height);
@@ -345,6 +398,7 @@ static bool render_frame(struct swaylock_surface *surface) {
 	cairo_set_operator(cairo, CAIRO_OPERATOR_SOURCE);
 	cairo_paint(cairo);
 	cairo_restore(cairo);
+	cairo_translate(cairo, 0, margin);
 
 	if (draw_indicator) {
 		draw_slots(cairo, state, buffer_width, buffer_diameter,

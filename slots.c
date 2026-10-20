@@ -14,50 +14,75 @@
 #define SLOT_SEVEN_ODDS 16 // 1 in N per reel
 #define SLOT_SPRING 0.3
 #define SLOT_DAMPING 0.35
+#define SLOT_EFFECT_TICKS 70
 
 const char slot_seven[] = "7";
 static const char *cross = "❌";
 
-static const struct {
-	const char *name, *symbols;
-} themes[] = {
-	{"classic", "🍒 ⭐ 💎 🍌"},
-	{"fruit", "🍒 🍋 🍊 🍉 🍇"},
-	{"cards", "🃏 ♠ ♥ ♦ ♣"},
-	{"casino", "🎰 🎲 🃏 💰 🔔"},
-	{"space", "🚀 🪐 🌙 ☄ 👽"},
-	{"food", "🍕 🍔 🌮 🍩 🍣"},
-	{"zoo", "🐸 🐙 🦊 🐼 🦄"},
+static const struct slot_theme themes[] = {
+	{"classic", "🍒 ⭐ 💎 🍌", slot_seven, "⭐ 💎 🌟", EFFECT_BURST, {1.0, 0.8, 0.2}},
+	{"fruit", "🍒 🍋 🍊 🍉 🍇", "🍒", "🍒 🍋 🍊 🍉 🍇", EFFECT_BURST, {1.0, 0.4, 0.2}},
+	{"cards", "🃏 ♠ ♥ ♦ ♣", "🃏", "♠ ♥ ♦ ♣", EFFECT_RAIN, {0.9, 0.1, 0.2}},
+	{"casino", "🎰 🎲 🃏 💰 🔔", "💰", "💰 💵 🪙", EFFECT_RAIN, {0.3, 0.9, 0.3}},
+	{"space", "🚀 🪐 🌙 ☄ 👽", "🚀", "🚀 ⭐ ✨ 🌟", EFFECT_LAUNCH, {0.4, 0.6, 1.0}},
+	{"food", "🍕 🍔 🌮 🍩 🍣", "🍕", "🍕 🍔 🌮 🍩 🍣", EFFECT_BURST, {1.0, 0.6, 0.2}},
+	{"zoo", "🐸 🐙 🦊 🐼 🦄", "🦄", "🦄 🌈 💖 ✨", EFFECT_FLOAT, {1.0, 0.5, 0.9}},
 };
+#define THEME_COUNT (sizeof(themes) / sizeof(*themes))
 
-const char *slots_theme(const char *name) {
-	for (size_t i = 0; i < sizeof(themes) / sizeof(*themes); i++) {
+static struct slot_theme custom_theme;
+
+bool slots_theme_exists(const char *name) {
+	if (strcmp(name, "random") == 0) {
+		return true;
+	}
+	for (size_t i = 0; i < THEME_COUNT; i++) {
 		if (strcmp(themes[i].name, name) == 0) {
-			return themes[i].symbols;
+			return true;
 		}
 	}
-	return NULL;
+	return false;
 }
 
-bool slots_init(struct swaylock_state *state, const char *symbols) {
-	struct slot_machine *m = &state->slots;
-	char *copy = strdup(symbols ? symbols : themes[0].symbols);
-	if (!copy) {
-		return false;
+static const struct slot_theme *find_theme(const char *name) {
+	for (size_t i = 0; name && i < THEME_COUNT; i++) {
+		if (strcmp(themes[i].name, name) == 0) {
+			return &themes[i];
+		}
 	}
-	size_t cap = strlen(copy) / 2 + 1;
-	m->symbols = calloc(cap, sizeof(*m->symbols));
-	if (!m->symbols) {
+	return &themes[rand() % THEME_COUNT];
+}
+
+static const char **split(const char *list, size_t *count) {
+	char *copy = strdup(list);
+	const char **out = copy ? calloc(strlen(copy) / 2 + 1, sizeof(*out)) : NULL;
+	*count = 0;
+	if (!out) {
 		free(copy);
-		return false;
+		return NULL;
 	}
 	char *save = NULL;
 	for (char *tok = strtok_r(copy, " ", &save); tok;
 			tok = strtok_r(NULL, " ", &save)) {
-		m->symbols[m->symbol_count++] =
-			strcmp(tok, slot_seven) == 0 ? slot_seven : tok;
+		out[(*count)++] = strcmp(tok, slot_seven) == 0 ? slot_seven : tok;
 	}
-	return m->symbol_count > 0;
+	return out;
+}
+
+bool slots_init(struct swaylock_state *state, const char *theme,
+		const char *symbols) {
+	struct slot_machine *m = &state->slots;
+	if (symbols) {
+		custom_theme = themes[0];
+		custom_theme.name = "custom";
+		custom_theme.symbols = symbols;
+		m->theme = &custom_theme;
+	} else {
+		m->theme = find_theme(theme);
+	}
+	m->symbols = split(m->theme->symbols, &m->symbol_count);
+	m->particle_symbols = split(m->theme->particles, &m->particle_symbol_count);
+	return m->symbol_count > 0 && m->particle_symbol_count > 0;
 }
 
 static const char *random_symbol(struct slot_machine *m) {
@@ -134,11 +159,96 @@ static bool reel_step(struct slot_machine *m, struct slot_reel *r) {
 	return r->mode != REEL_REST || r->prev;
 }
 
+static double frand(double lo, double hi) {
+	return lo + (hi - lo) * rand() / (double)RAND_MAX;
+}
+
+static void spawn(struct slot_machine *m, double x, double y,
+		double vx, double vy) {
+	if (m->particle_count == SLOT_MAX_PARTICLES) {
+		return;
+	}
+	m->particles[m->particle_count++] = (struct slot_particle){
+		.symbol = m->particle_symbols[rand() % m->particle_symbol_count],
+		.x = x, .y = y, .vx = vx, .vy = vy,
+		.spin = frand(-0.15, 0.15),
+	};
+}
+
+static void effect_spawn(struct slot_machine *m) {
+	switch (m->theme->effect) {
+	case EFFECT_BURST:
+		if (m->effect_ticks % 4 == 0) {
+			for (int i = 0; i < 3; i++) {
+				spawn(m, (i - 1) * 1.4, 0, frand(-0.18, 0.18), frand(-0.4, -0.2));
+			}
+		}
+		break;
+	case EFFECT_RAIN:
+		if (m->effect_ticks % 2 == 0) {
+			spawn(m, frand(-4.2, 4.2), -4.5, frand(-0.02, 0.02), frand(0.08, 0.14));
+		}
+		break;
+	case EFFECT_LAUNCH:
+		if (m->effect_ticks % 3 == 0) {
+			spawn(m, frand(-3.5, 3.5), 4.5, frand(-0.02, 0.02), frand(-0.06, -0.02));
+		}
+		break;
+	case EFFECT_FLOAT:
+		if (m->effect_ticks % 3 == 0) {
+			spawn(m, frand(-3.5, 3.5), 3, 0, frand(-0.12, -0.08));
+		}
+		break;
+	}
+}
+
+static void effect_step(struct slot_machine *m) {
+	if (m->effect_ticks > 0) {
+		effect_spawn(m);
+		m->effect_ticks--;
+	}
+	int n = 0;
+	for (int i = 0; i < m->particle_count; i++) {
+		struct slot_particle p = m->particles[i];
+		switch (m->theme->effect) {
+		case EFFECT_BURST:
+			p.vy += 0.02;
+			break;
+		case EFFECT_RAIN:
+			p.vy += 0.003;
+			break;
+		case EFFECT_LAUNCH:
+			p.vy -= 0.008;
+			p.spin = 0;
+			break;
+		case EFFECT_FLOAT:
+			p.vx = sin(p.age * 0.2) * 0.04;
+			p.spin = 0;
+			break;
+		}
+		p.x += p.vx;
+		p.y += p.vy;
+		p.rotation += p.spin;
+		p.age++;
+		if (fabs(p.x) < 5 && fabs(p.y) < 5) {
+			m->particles[n++] = p;
+		}
+	}
+	m->particle_count = n;
+}
+
+bool slots_effect_active(struct slot_machine *m) {
+	return m->effect_ticks > 0 || m->particle_count > 0;
+}
+
 static void celebrate(struct slot_machine *m) {
 	const char *s = m->reels[0].symbol;
 	if (s != cross && s == m->reels[1].symbol && s == m->reels[2].symbol) {
 		m->glow = SLOT_GLOW_TICKS;
-		m->jackpot = s == slot_seven;
+		m->shake = s == slot_seven || m->won;
+		if (m->won) {
+			m->effect_ticks = SLOT_EFFECT_TICKS;
+		}
 	}
 }
 
@@ -168,7 +278,8 @@ static void slots_tick(void *data) {
 	} else if (m->glow > 0) {
 		m->glow--;
 	}
-	if (moving || m->glow > 0 || m->spinning) {
+	effect_step(m);
+	if (moving || m->glow > 0 || m->spinning || slots_effect_active(m)) {
 		schedule_tick(state);
 	}
 	damage_state(state);
@@ -211,7 +322,8 @@ static void stop(struct swaylock_state *state, const char *symbol) {
 }
 
 void slots_win(struct swaylock_state *state) {
-	stop(state, slot_seven);
+	state->slots.won = true;
+	stop(state, state->slots.theme->win);
 }
 
 void slots_lose(struct swaylock_state *state) {
@@ -223,6 +335,7 @@ void slots_clear(struct swaylock_state *state) {
 	m->visible = m->spinning = false;
 	m->stop_symbol = NULL;
 	m->glow = 0;
+	m->effect_ticks = m->particle_count = 0;
 	if (m->timer) {
 		loop_remove_timer(state->eventloop, m->timer);
 		m->timer = NULL;

@@ -206,8 +206,8 @@ Locks your Wayland session.
 # SLOTS
 
 *--slot-theme* <name>
-	Symbol set for the slot reels: classic, fruit, cards, casino, space, food,
-	zoo. Default is classic.
+	Symbol set and win effect for the slot reels: random, classic, fruit,
+	cards, casino, space, food, zoo. Default is random, picked on each lock.
 
 *--slot-symbols* <list>
 	Space-separated custom reel symbols, e.g. "🍕 🐸 7". _7_ is drawn as a red
