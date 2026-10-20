@@ -211,7 +211,7 @@ Locks your Wayland session.
 
 *--slot-symbols* <list>
 	Space-separated custom reel symbols, e.g. "🍕 🐸 7". _7_ is drawn as a red
-	seven. A rare seven is always mixed in.
+	seven. A rare seven is mixed in (every theme except classic).
 
 # SIGNALS
 

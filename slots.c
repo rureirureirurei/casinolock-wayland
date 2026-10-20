@@ -20,13 +20,13 @@ const char slot_seven[] = "7";
 static const char *cross = "❌";
 
 static const struct slot_theme themes[] = {
-	{"classic", "🍒 ⭐ 💎 🍌", slot_seven, "⭐ 💎 🌟", EFFECT_BURST, {1.0, 0.8, 0.2}},
-	{"fruit", "🍒 🍋 🍊 🍉 🍇", "🍒", "🍒 🍋 🍊 🍉 🍇", EFFECT_BURST, {1.0, 0.4, 0.2}},
-	{"cards", "🃏 ♠ ♥ ♦ ♣", "🃏", "♠ ♥ ♦ ♣", EFFECT_RAIN, {0.9, 0.1, 0.2}},
-	{"casino", "🎰 🎲 🃏 💰 🔔", "💰", "💰 💵 🪙", EFFECT_RAIN, {0.3, 0.9, 0.3}},
-	{"space", "🚀 🪐 🌙 ☄ 👽", "🚀", "🚀 ⭐ ✨ 🌟", EFFECT_LAUNCH, {0.4, 0.6, 1.0}},
-	{"food", "🍕 🍔 🌮 🍩 🍣", "🍕", "🍕 🍔 🌮 🍩 🍣", EFFECT_BURST, {1.0, 0.6, 0.2}},
-	{"zoo", "🐸 🐙 🦊 🐼 🦄", "🦄", "🦄 🌈 💖 ✨", EFFECT_FLOAT, {1.0, 0.5, 0.9}},
+	{"classic", "🍒 ⭐ 💎 🍌", "🍒", "🍒 ⭐ 💎", EFFECT_BURST, {1.0, 0.8, 0.2}, false},
+	{"fruit", "🍒 🍋 🍊 🍉 🍇", "🍒", "🍒 🍋 🍊 🍉 🍇", EFFECT_BURST, {1.0, 0.4, 0.2}, true},
+	{"cards", "🃏 ♠ ♥ ♦ ♣", "🃏", "♠ ♥ ♦ ♣", EFFECT_RAIN, {0.9, 0.1, 0.2}, true},
+	{"casino", "🎰 🎲 🃏 💰 🔔", "💰", "💰 💵 🪙", EFFECT_RAIN, {0.3, 0.9, 0.3}, true},
+	{"space", "🚀 🪐 🌙 ☄ 👽", "🚀", "🚀 ⭐ ✨ 🌟", EFFECT_LAUNCH, {0.4, 0.6, 1.0}, true},
+	{"food", "🍕 🍔 🌮 🍩 🍣", "🍕", "🍕 🍔 🌮 🍩 🍣", EFFECT_BURST, {1.0, 0.6, 0.2}, true},
+	{"zoo", "🐸 🐙 🦊 🐼 🦄", "🦄", "🦄 🌈 💖 ✨", EFFECT_FLOAT, {1.0, 0.5, 0.9}, true},
 };
 #define THEME_COUNT (sizeof(themes) / sizeof(*themes))
 
@@ -76,6 +76,7 @@ bool slots_init(struct swaylock_state *state, const char *theme,
 		custom_theme = themes[0];
 		custom_theme.name = "custom";
 		custom_theme.symbols = symbols;
+		custom_theme.sevens = true;
 		m->theme = &custom_theme;
 	} else {
 		m->theme = find_theme(theme);
@@ -86,7 +87,7 @@ bool slots_init(struct swaylock_state *state, const char *theme,
 }
 
 static const char *random_symbol(struct slot_machine *m) {
-	if (rand() % SLOT_SEVEN_ODDS == 0) {
+	if (m->theme->sevens && rand() % SLOT_SEVEN_ODDS == 0) {
 		return slot_seven;
 	}
 	return m->symbols[rand() % m->symbol_count];

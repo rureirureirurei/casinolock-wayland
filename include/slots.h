@@ -36,6 +36,7 @@ struct slot_theme {
 	const char *particles; // space-separated
 	enum slot_effect effect;
 	double glow[3];
+	bool sevens; // mix in the rare red 7
 };
 
 // Positions in symbol sizes relative to the middle reel, y down
