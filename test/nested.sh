@@ -4,6 +4,8 @@
 # Headless (no window): HEADLESS=1 test/nested.sh ...
 dir=$(cd "$(dirname "$0")/.." && pwd)
 lock="$dir/build/swaylock -c 202020 $(printf '%q ' "$@")"
+# Nested sway defaults to US qwerty; reuse your keyboard layout so the password types the same
+xkb=$(grep -hE '^\s*xkb_' "${XDG_CONFIG_HOME:-$HOME/.config}"/sway/config 2>/dev/null)
 cfg=$(mktemp)
 trap 'rm -f "$cfg"' EXIT
 cat > "$cfg" <<CFG
@@ -11,6 +13,9 @@ output * bg #303030 solid_color
 output HEADLESS-1 resolution 900x400
 exec $lock
 bindsym F12 exec $lock
+input * {
+$xkb
+}
 CFG
 if [ -n "$HEADLESS" ]; then
 	WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_LIBINPUT_NO_DEVICES=1 sway -c "$cfg"
