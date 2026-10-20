@@ -23,6 +23,7 @@
 #include "password-buffer.h"
 #include "pool-buffer.h"
 #include "seat.h"
+#include "slots.h"
 #include "swaylock.h"
 #include "ext-session-lock-v1-client-protocol.h"
 
@@ -1047,7 +1048,7 @@ static void comm_in(int fd, short mask, void *data) {
 			state.run_display = false;
 		} else {
 			state.auth_state = AUTH_STATE_INVALID;
-			set_cross_emojis(&state);  // Show 3 crosses for wrong password
+			slots_lose(&state);
 			schedule_auth_idle(&state);
 			++state.failed_attempts;
 			damage_state(&state);

@@ -7,46 +7,7 @@
 #include "cairo.h"
 #include "pool-buffer.h"
 #include "seat.h"
-
-// Particle system for celebration animations
-#define MAX_PARTICLES 100
-
-// Single emoji particle
-struct emoji_particle {
-	double x, y;              // Position
-	double vx, vy;            // Velocity (pixels/sec)
-	double rotation;          // Current rotation angle (radians)
-	double rotation_speed;    // Rotation rate (radians/sec)
-	char emoji[5];            // UTF-8 emoji
-	int age;                  // Frames alive
-	int bounce_count;         // Number of bounces (max 3)
-	bool active;              // Is this particle alive?
-};
-
-// Particle spawn definition (what the strategy defines)
-struct particle_spawn_def {
-	double spawn_x, spawn_y;      // Spawn position (can be relative, resolved at runtime)
-	double velocity_x, velocity_y; // Initial velocity
-	double rotation_speed;         // How fast to spin
-	char emoji[5];                 // Which emoji
-	int spawn_frame;               // When to spawn (frame number)
-};
-
-// Strategy configuration
-struct celebration_strategy {
-	struct particle_spawn_def *spawn_defs; // Array of particle definitions
-	int particle_count;                     // How many particles total
-	int total_frames;                       // Duration of spawn sequence
-};
-
-// Active particle system state
-struct particle_system {
-	struct emoji_particle particles[MAX_PARTICLES];  // Particle pool
-	int active_count;                                // How many are alive
-	struct celebration_strategy *strategy;           // Current strategy
-	int current_frame;                               // Animation frame counter
-	bool active;                                     // Is celebration playing?
-};
+#include "slots.h"
 
 // Indicator state: status of authentication attempt
 enum auth_state {
@@ -122,7 +83,6 @@ struct swaylock_state {
 	struct loop_timer *input_idle_timer; // timer to reset input state to IDLE
 	struct loop_timer *auth_idle_timer; // timer to stop displaying AUTH_STATE_INVALID
 	struct loop_timer *clear_password_timer;  // clears the password buffer
-	struct loop_timer *animation_timer; // timer for emoji animation updates
 	struct wl_display *display;
 	struct wl_compositor *compositor;
 	struct wl_subcompositor *subcompositor;
@@ -137,15 +97,7 @@ struct swaylock_state {
 	enum auth_state auth_state; // state of the authentication attempt
 	enum input_state input_state; // state of the password buffer and key inputs
 	uint32_t highlight_start; // position of highlight; 2048 = 1 full turn
-	char slot_emojis[3][5]; // slot machine emojis (3 slots, UTF-8 encoded)
-	bool has_emojis; // whether emojis have been generated
-	double emoji_y_positions[3]; // current y positions for animation
-	double emoji_target_y; // target y position (center)
-	bool emoji_animating; // whether emojis are currently animating
-	char old_slot_emojis[3][5]; // previous emojis falling off screen
-	double old_emoji_y_positions[3]; // y positions of old emojis
-	bool has_old_emojis; // whether old emojis are falling
-	struct particle_system celebration_particles; // Celebration particle system
+	struct slot_machine slots;
 	int failed_attempts;
 	bool run_display, locked;
 	struct ext_session_lock_manager_v1 *ext_session_lock_manager_v1;
@@ -184,7 +136,6 @@ struct swaylock_image {
 
 void swaylock_handle_key(struct swaylock_state *state,
 		xkb_keysym_t keysym, uint32_t codepoint);
-void set_cross_emojis(struct swaylock_state *state);
 
 void render(struct swaylock_surface *surface);
 void damage_state(struct swaylock_state *state);

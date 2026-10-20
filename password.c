@@ -9,41 +9,9 @@
 #include "log.h"
 #include "loop.h"
 #include "seat.h"
+#include "slots.h"
 #include "swaylock.h"
 #include "unicode.h"
-#include "celebration_strategies.h"
-
-// Forward declarations
-static void cancel_animation(struct swaylock_state *state);
-static void schedule_animation(struct swaylock_state *state);
-
-// Active strategy instance
-static struct celebration_strategy current_strategy = {0};
-
-static void start_celebration(struct swaylock_state *state, int screen_width, int screen_height) {
-	// Choose strategy - CHANGE THIS TO TRY DIFFERENT STRATEGIES!
-	// Options:
-	//   init_jackpot_burst_strategy     - 40 emojis explode from center
-	//   init_corner_chaos_strategy      - Emojis from all 4 corners
-	//   init_fountain_strategy           - Continuous upward stream
-	//   init_diagonal_test_strategy      - Simple diagonal (original)
-
-	init_jackpot_burst_strategy(&current_strategy, screen_width, screen_height);
-
-	// Reset particle system
-	state->celebration_particles.strategy = &current_strategy;
-	state->celebration_particles.current_frame = 0;
-	state->celebration_particles.active = true;
-	state->celebration_particles.active_count = 0;
-
-	// Clear all particles
-	for (int i = 0; i < MAX_PARTICLES; i++) {
-		state->celebration_particles.particles[i].active = false;
-	}
-
-	// Start animation timer
-	schedule_animation(state);
-}
 
 void clear_buffer(char *buf, size_t size) {
 	// Use volatile keyword so so compiler can't optimize this out.
@@ -120,12 +88,9 @@ static void clear_password(void *data) {
 	struct swaylock_state *state = data;
 	state->clear_password_timer = NULL;
 	state->input_state = INPUT_STATE_CLEAR;
+	slots_clear(state);
 	schedule_input_idle(state);
 	clear_password_buffer(&state->password);
-	state->has_emojis = false;
-	state->has_old_emojis = false;
-	state->emoji_animating = false;
-	cancel_animation(state);
 	damage_state(state);
 }
 
@@ -144,34 +109,6 @@ static void cancel_password_clear(struct swaylock_state *state) {
 	}
 }
 
-static void animation_tick(void *data) {
-	struct swaylock_state *state = data;
-	state->animation_timer = NULL;
-
-	if (state->emoji_animating || state->has_old_emojis ||
-	    state->celebration_particles.active || state->celebration_particles.active_count > 0) {
-		damage_state(state);
-		// Schedule next frame (16ms = ~60 FPS)
-		state->animation_timer = loop_add_timer(
-			state->eventloop, 16, animation_tick, state);
-	}
-}
-
-static void schedule_animation(struct swaylock_state *state) {
-	if (state->animation_timer) {
-		loop_remove_timer(state->eventloop, state->animation_timer);
-	}
-	state->animation_timer = loop_add_timer(
-		state->eventloop, 16, animation_tick, state);
-}
-
-static void cancel_animation(struct swaylock_state *state) {
-	if (state->animation_timer) {
-		loop_remove_timer(state->eventloop, state->animation_timer);
-		state->animation_timer = NULL;
-	}
-}
-
 static void submit_password(struct swaylock_state *state) {
 	if (state->args.ignore_empty && state->password.len == 0) {
 		return;
@@ -184,6 +121,7 @@ static void submit_password(struct swaylock_state *state) {
 	state->auth_state = AUTH_STATE_VALIDATING;
 	cancel_password_clear(state);
 	cancel_input_idle(state);
+	slots_spin(state);
 
 	if (!write_comm_request(&state->password)) {
 		state->auth_state = AUTH_STATE_INVALID;
@@ -199,64 +137,6 @@ static void update_highlight(struct swaylock_state *state) {
 		(state->highlight_start + (rand() % 1024) + 512) % 2048;
 }
 
-static void randomize_slot_emojis(struct swaylock_state *state) {
-	// Emoji set: Cherry 🍒, Peach 🍑, Star ⭐
-	const char *emojis[4] = {
-		"\xF0\x9F\x8D\x92", // 🍒 Cherry
-		"\xE2\xAD\x90",     // ⭐ Star
-		"\xF0\x9F\x92\x8E", // 💎 Diamond
-		"\xF0\x9F\x8D\x8C", // 🍌 Banana
-	};
-
-	// Save old emojis to fall off screen
-	if (state->has_emojis) {
-		for (int i = 0; i < 3; i++) {
-			strcpy(state->old_slot_emojis[i], state->slot_emojis[i]);
-			state->old_emoji_y_positions[i] = state->emoji_y_positions[i];
-		}
-		state->has_old_emojis = true;
-	}
-
-	// Randomize all 3 slots
-	for (int i = 0; i < 3; i++) {
-		int emoji_idx = rand() % 4;
-		strcpy(state->slot_emojis[i], emojis[emoji_idx]);
-		// Start emojis at different heights above screen
-		state->emoji_y_positions[i] = -100.0 - (i * 30.0);
-	}
-
-	state->has_emojis = true;
-	state->emoji_animating = true;
-	state->emoji_target_y = 0.0; // Will be set properly during render
-	schedule_animation(state);
-}
-
-void set_cross_emojis(struct swaylock_state *state) {
-	// Cross emoji: ❌
-	const char *cross = "\xE2\x9D\x8C";
-
-	// Save old emojis to fall off screen
-	if (state->has_emojis) {
-		for (int i = 0; i < 3; i++) {
-			strcpy(state->old_slot_emojis[i], state->slot_emojis[i]);
-			state->old_emoji_y_positions[i] = state->emoji_y_positions[i];
-		}
-		state->has_old_emojis = true;
-	}
-
-	// Set all 3 slots to crosses and start them above screen
-	for (int i = 0; i < 3; i++) {
-		strcpy(state->slot_emojis[i], cross);
-		// Start crosses at different heights above screen (same as regular emojis)
-		state->emoji_y_positions[i] = -100.0 - (i * 30.0);
-	}
-
-	state->has_emojis = true;
-	state->emoji_animating = true;  // Enable smooth fall animation
-	state->emoji_target_y = 0.0;    // Will be set properly during render
-	schedule_animation(state);
-}
-
 void swaylock_handle_key(struct swaylock_state *state,
 		xkb_keysym_t keysym, uint32_t codepoint) {
 
@@ -270,18 +150,17 @@ void swaylock_handle_key(struct swaylock_state *state,
 		if (state->xkb.control) {
 			clear_password_buffer(&state->password);
 			state->input_state = INPUT_STATE_CLEAR;
+			slots_clear(state);
 			cancel_password_clear(state);
-			state->has_emojis = false;
-			state->has_old_emojis = false;
-			state->emoji_animating = false;
-			cancel_animation(state);
 		} else {
 			if (backspace(&state->password) && state->password.len != 0) {
 				state->input_state = INPUT_STATE_BACKSPACE;
 				schedule_password_clear(state);
 				update_highlight(state);
+				slots_spin(state);
 			} else {
 				state->input_state = INPUT_STATE_CLEAR;
+				slots_clear(state);
 				cancel_password_clear(state);
 			}
 		}
@@ -291,11 +170,8 @@ void swaylock_handle_key(struct swaylock_state *state,
 	case XKB_KEY_Escape:
 		clear_password_buffer(&state->password);
 		state->input_state = INPUT_STATE_CLEAR;
+		slots_clear(state);
 		cancel_password_clear(state);
-		state->has_emojis = false;
-		state->has_old_emojis = false;
-		state->emoji_animating = false;
-		cancel_animation(state);
 		schedule_input_idle(state);
 		damage_state(state);
 		break;
@@ -328,24 +204,13 @@ void swaylock_handle_key(struct swaylock_state *state,
 		if (state->xkb.control) {
 			clear_password_buffer(&state->password);
 			state->input_state = INPUT_STATE_CLEAR;
+			slots_clear(state);
 			cancel_password_clear(state);
-			state->has_emojis = false;
-			state->has_old_emojis = false;
-			state->emoji_animating = false;
-			cancel_animation(state);
 			schedule_input_idle(state);
 			damage_state(state);
 			break;
 		}
 		// fallthrough
-	// case XKB_KEY_space:
-	// 	// TEST TRIGGER: Spacebar triggers celebration animation
-	// 	if (state->xkb.control) {
-	// 		start_celebration(state, 1728, 1080);
-	// 		// damage_state(state);
-	// 		break;
-	// 	}
-		/* fallthrough */
 	default:
 		if (codepoint) {
 			append_ch(&state->password, codepoint);
@@ -353,7 +218,7 @@ void swaylock_handle_key(struct swaylock_state *state,
 			schedule_password_clear(state);
 			schedule_input_idle(state);
 			update_highlight(state);
-			randomize_slot_emojis(state);
+			slots_spin(state);
 			damage_state(state);
 		}
 		break;

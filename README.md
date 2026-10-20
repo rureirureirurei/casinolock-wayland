@@ -8,14 +8,15 @@ This is a personal fork of the awesome [swaylock](https://github.com/swaywm/sway
 <img width="3430" height="1934" alt="image" src="https://github.com/user-attachments/assets/4ca77f43-f9bd-4705-b681-60e3f398167c" />
 [demo.mp4](./demo.mp4)
 
-## Warning
+## How it works
 
-**This patch is absolutely not checked for vulnerabilities. You should not be using it if you care about your security.**
+The ring indicator is replaced by three slot reels.
 
-## Planned Features
+- Each keypress rolls 🍒 ⭐ 💎 🍌
+- Reels spin while the password is verified
+- Wrong password: ❌ ❌ ❌
 
-- Cherry blast animation on unlock
-- Bypass password check when you hit 3 bananas
+Reels are random and never depend on what you type. Authentication code (PAM, shadow, comm) is unmodified upstream swaylock.
 
 ## Installation
 
